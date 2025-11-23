@@ -55,6 +55,17 @@ public class OrganizationController {
         return ResponseEntity.ok(organizations);
     }
 
+    @GetMapping("/my-organizations")
+    @PreAuthorize("hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_ORG_ADMIN')")
+    @Operation(summary = "Get my organizations", description = "Get organizations accessible to the current user")
+    public ResponseEntity<List<OrganizationDTO>> getMyOrganizations(
+            jakarta.servlet.http.HttpServletRequest request) {
+        log.info("REST request to get my organizations");
+        Long organizationId = (Long) request.getAttribute("organizationId");
+        List<OrganizationDTO> organizations = organizationService.getMyOrganizations(organizationId);
+        return ResponseEntity.ok(organizations);
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_ORG_ADMIN')")
     @Operation(summary = "Get organization by ID", description = "Get organization details")

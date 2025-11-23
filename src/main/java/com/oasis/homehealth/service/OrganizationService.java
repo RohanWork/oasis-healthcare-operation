@@ -4,11 +4,14 @@ import com.oasis.homehealth.dto.OrganizationDTO;
 import com.oasis.homehealth.dto.OrganizationRequest;
 import com.oasis.homehealth.entity.Organization;
 import com.oasis.homehealth.repository.OrganizationRepository;
+import com.oasis.homehealth.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -142,6 +145,35 @@ public class OrganizationService {
     }
 
     /**
+     * Get organizations accessible to the current user
+     * SYSTEM_ADMIN can see all organizations
+     * ORG_ADMIN can see only their own organization
+     */
+    @Transactional(readOnly = true)
+    public List<OrganizationDTO> getMyOrganizations(Long organizationId) {
+        UserPrincipal currentUser = getCurrentUser();
+        boolean isSystemAdmin = currentUser.getAuthorities().stream()
+                .anyMatch(auth -> auth.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+
+        if (isSystemAdmin) {
+            // SYSTEM_ADMIN can see all organizations
+            return getAllOrganizations();
+        } else if (organizationId != null) {
+            // ORG_ADMIN can see only their own organization
+            Organization organization = organizationRepository.findById(organizationId)
+                    .orElseThrow(() -> new RuntimeException("Organization not found"));
+            
+            if (Boolean.TRUE.equals(organization.getIsDeleted())) {
+                return Collections.emptyList();
+            }
+            
+            return Collections.singletonList(convertToDTO(organization));
+        } else {
+            throw new RuntimeException("Organization ID is required for non-system administrators");
+        }
+    }
+
+    /**
      * Get organization by ID
      */
     @Transactional(readOnly = true)
@@ -154,6 +186,13 @@ public class OrganizationService {
         }
 
         return convertToDTO(organization);
+    }
+
+    /**
+     * Get current user from security context
+     */
+    private UserPrincipal getCurrentUser() {
+        return (UserPrincipal) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
     }
 
     /**

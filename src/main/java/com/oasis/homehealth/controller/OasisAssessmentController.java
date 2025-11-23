@@ -32,9 +32,15 @@ public class OasisAssessmentController {
     @PostMapping
     @PreAuthorize("hasAuthority('OASIS_CREATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_RN', 'ROLE_PT', 'ROLE_QA_NURSE')")
     @Operation(summary = "Create new OASIS assessment", description = "Create a new OASIS-E1 assessment for a patient")
-    public ResponseEntity<OasisAssessmentDTO> createAssessment(@Valid @RequestBody OasisAssessmentRequest request) {
+    public ResponseEntity<OasisAssessmentDTO> createAssessment(
+            @Valid @RequestBody OasisAssessmentRequest request,
+            HttpServletRequest httpRequest) {
         log.info("REST request to create OASIS assessment for patient: {}", request.getPatientId());
-        OasisAssessmentDTO result = oasisService.createAssessment(request);
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required. Please select an organization.");
+        }
+        OasisAssessmentDTO result = oasisService.createAssessment(request, organizationId);
         return ResponseEntity.status(HttpStatus.CREATED).body(result);
     }
 
@@ -43,9 +49,14 @@ public class OasisAssessmentController {
     @Operation(summary = "Update OASIS assessment", description = "Update an existing OASIS assessment (manual save)")
     public ResponseEntity<OasisAssessmentDTO> updateAssessment(
             @PathVariable Long id,
-            @Valid @RequestBody OasisAssessmentRequest request) {
+            @Valid @RequestBody OasisAssessmentRequest request,
+            HttpServletRequest httpRequest) {
         log.info("REST request to update OASIS assessment: {}", id);
-        OasisAssessmentDTO result = oasisService.updateAssessment(id, request);
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required. Please select an organization.");
+        }
+        OasisAssessmentDTO result = oasisService.updateAssessment(id, request, organizationId);
         return ResponseEntity.ok(result);
     }
 
@@ -54,18 +65,29 @@ public class OasisAssessmentController {
     @Operation(summary = "Auto-save OASIS assessment", description = "Auto-save assessment (called every 15 seconds)")
     public ResponseEntity<OasisAssessmentDTO> autoSaveAssessment(
             @PathVariable Long id,
-            @RequestBody OasisAssessmentRequest request) {
+            @RequestBody OasisAssessmentRequest request,
+            HttpServletRequest httpRequest) {
         log.debug("REST request to auto-save OASIS assessment: {}", id);
-        OasisAssessmentDTO result = oasisService.autoSaveAssessment(id, request);
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required. Please select an organization.");
+        }
+        OasisAssessmentDTO result = oasisService.autoSaveAssessment(id, request, organizationId);
         return ResponseEntity.ok(result);
     }
 
     @PostMapping("/{id}/submit")
     @PreAuthorize("hasAuthority('OASIS_SUBMIT') or hasRole('ROLE_SYSTEM_ADMIN')")
     @Operation(summary = "Submit for QA review", description = "Submit OASIS assessment for QA review")
-    public ResponseEntity<OasisAssessmentDTO> submitForQA(@PathVariable Long id) {
+    public ResponseEntity<OasisAssessmentDTO> submitForQA(
+            @PathVariable Long id,
+            HttpServletRequest httpRequest) {
         log.info("REST request to submit OASIS assessment for QA: {}", id);
-        OasisAssessmentDTO result = oasisService.submitForQA(id);
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required. Please select an organization.");
+        }
+        OasisAssessmentDTO result = oasisService.submitForQA(id, organizationId);
         return ResponseEntity.ok(result);
     }
 
@@ -90,9 +112,15 @@ public class OasisAssessmentController {
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority('OASIS_READ') or hasRole('ROLE_SYSTEM_ADMIN')")
     @Operation(summary = "Get assessment by ID", description = "Get OASIS assessment details")
-    public ResponseEntity<OasisAssessmentDTO> getAssessment(@PathVariable Long id) {
+    public ResponseEntity<OasisAssessmentDTO> getAssessment(
+            @PathVariable Long id,
+            HttpServletRequest httpRequest) {
         log.info("REST request to get OASIS assessment: {}", id);
-        OasisAssessmentDTO result = oasisService.getAssessment(id);
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required. Please select an organization.");
+        }
+        OasisAssessmentDTO result = oasisService.getAssessment(id, organizationId);
         return ResponseEntity.ok(result);
     }
 
@@ -176,9 +204,15 @@ public class OasisAssessmentController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('OASIS_DELETE') or hasRole('ROLE_SYSTEM_ADMIN')")
     @Operation(summary = "Delete assessment", description = "Soft delete OASIS assessment")
-    public ResponseEntity<Void> deleteAssessment(@PathVariable Long id) {
+    public ResponseEntity<Void> deleteAssessment(
+            @PathVariable Long id,
+            HttpServletRequest httpRequest) {
         log.info("REST request to delete OASIS assessment: {}", id);
-        oasisService.deleteAssessment(id);
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required. Please select an organization.");
+        }
+        oasisService.deleteAssessment(id, organizationId);
         return ResponseEntity.noContent().build();
     }
 }

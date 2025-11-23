@@ -29,6 +29,7 @@ com\oasis\homehealth\service\VisitNoteService.class
 com\oasis\homehealth\dto\PlanOfCareGoalDTO.class
 com\oasis\homehealth\entity\Task.class
 com\oasis\homehealth\entity\Patient.class
+com\oasis\homehealth\security\SecurityConfig$1.class
 com\oasis\homehealth\security\JwtAuthenticationEntryPoint.class
 com\oasis\homehealth\entity\embedded\SectionK.class
 com\oasis\homehealth\repository\EpisodeRepository.class

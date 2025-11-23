@@ -47,6 +47,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (organizationId != null) {
                     request.setAttribute("organizationId", organizationId);
                 }
+                
+                logger.debug("Authenticated user: {} with roles: {} and organizationId: {}", 
+                    userDetails.getUsername(), 
+                    userDetails.getAuthorities(), 
+                    organizationId);
+            } else {
+                logger.debug("JWT token not found or invalid");
             }
         } catch (Exception ex) {
             logger.error("Could not set user authentication in security context", ex);

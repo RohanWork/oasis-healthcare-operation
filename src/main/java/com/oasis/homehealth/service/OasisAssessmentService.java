@@ -35,12 +35,13 @@ public class OasisAssessmentService {
     /**
      * Create a new OASIS assessment
      */
-    public OasisAssessmentDTO createAssessment(OasisAssessmentRequest request) {
-        log.info("Creating OASIS assessment for patient: {}", request.getPatientId());
+    public OasisAssessmentDTO createAssessment(OasisAssessmentRequest request, Long organizationId) {
+        log.info("Creating OASIS assessment for patient: {} in organization: {}", request.getPatientId(), organizationId);
 
-        // Get current user
-        UserPrincipal userPrincipal = getCurrentUser();
-        Long organizationId = userPrincipal.getOrganizationId();
+        // Validate organizationId is provided
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required");
+        }
 
         // Validate patient exists and belongs to organization
         Patient patient = patientRepository.findById(request.getPatientId())
@@ -98,14 +99,18 @@ public class OasisAssessmentService {
     /**
      * Update existing assessment (auto-save or manual save)
      */
-    public OasisAssessmentDTO updateAssessment(Long id, OasisAssessmentRequest request) {
-        log.info("Updating OASIS assessment: {}", id);
+    public OasisAssessmentDTO updateAssessment(Long id, OasisAssessmentRequest request, Long organizationId) {
+        log.info("Updating OASIS assessment: {} in organization: {}", id, organizationId);
+
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required");
+        }
 
         OasisAssessment assessment = oasisRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Assessment not found"));
 
         // Validate user can edit
-        validateCanEdit(assessment);
+        validateCanEdit(assessment, organizationId);
 
         // Update fields
         mapRequestToEntity(request, assessment);
@@ -126,26 +131,35 @@ public class OasisAssessmentService {
     /**
      * Auto-save assessment (called every 15 seconds from frontend)
      */
-    public OasisAssessmentDTO autoSaveAssessment(Long id, OasisAssessmentRequest request) {
-        log.debug("Auto-saving OASIS assessment: {}", id);
-        return updateAssessment(id, request);
+    public OasisAssessmentDTO autoSaveAssessment(Long id, OasisAssessmentRequest request, Long organizationId) {
+        log.debug("Auto-saving OASIS assessment: {} in organization: {}", id, organizationId);
+        return updateAssessment(id, request, organizationId);
     }
 
     /**
      * Submit assessment for QA review
      */
-    public OasisAssessmentDTO submitForQA(Long id) {
-        log.info("Submitting OASIS assessment for QA: {}", id);
+    public OasisAssessmentDTO submitForQA(Long id, Long organizationId) {
+        log.info("Submitting OASIS assessment for QA: {} in organization: {}", id, organizationId);
+
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required");
+        }
 
         OasisAssessment assessment = oasisRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Assessment not found"));
 
         // Validate user can edit
-        validateCanEdit(assessment);
+        validateCanEdit(assessment, organizationId);
+
+        // Recalculate completion percentage to ensure it's up to date
+        updateSkipLogicAndCompletion(assessment);
+        assessment = oasisRepository.save(assessment);
 
         // Validate completion
         if (assessment.getCompletionPercentage() < 100) {
-            throw new RuntimeException("Assessment must be 100% complete before submission");
+            throw new RuntimeException("Assessment must be 100% complete before submission. Current completion: " + 
+                assessment.getCompletionPercentage() + "%");
         }
 
         // Update status
@@ -227,14 +241,17 @@ public class OasisAssessmentService {
      * Get assessment by ID
      */
     @Transactional(readOnly = true)
-    public OasisAssessmentDTO getAssessment(Long id) {
+    public OasisAssessmentDTO getAssessment(Long id, Long organizationId) {
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required");
+        }
+
         OasisAssessment assessment = oasisRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Assessment not found"));
 
         // Validate organization access
-        UserPrincipal userPrincipal = getCurrentUser();
-        if (!assessment.getOrganization().getId().equals(userPrincipal.getOrganizationId())) {
-            throw new RuntimeException("Access denied");
+        if (!assessment.getOrganization().getId().equals(organizationId)) {
+            throw new RuntimeException("Access denied: Assessment does not belong to your organization");
         }
 
         return mapToDTO(assessment);
@@ -321,14 +338,18 @@ public class OasisAssessmentService {
     /**
      * Delete assessment (soft delete)
      */
-    public void deleteAssessment(Long id) {
-        log.info("Deleting OASIS assessment: {}", id);
+    public void deleteAssessment(Long id, Long organizationId) {
+        log.info("Deleting OASIS assessment: {} in organization: {}", id, organizationId);
+
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required");
+        }
 
         OasisAssessment assessment = oasisRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Assessment not found"));
 
         // Validate user can delete
-        validateCanEdit(assessment);
+        validateCanEdit(assessment, organizationId);
 
         assessment.setIsDeleted(true);
         oasisRepository.save(assessment);
@@ -362,9 +383,10 @@ public class OasisAssessmentService {
             skipped.add("M1005");
         }
 
-        // M1307-M1324: Skip if M1306 = "0" (no pressure ulcers)
+        // M1307-M1320: Skip if M1306 = "0" (no pressure ulcers)
         if ("0".equals(assessment.getM1306PressureUlcer())) {
-            skipped.addAll(Arrays.asList("M1307", "M1308", "M1320"));
+            skipped.addAll(Arrays.asList("M1307", "M1308_Stage1", "M1308_Stage2", "M1308_Stage3", 
+                "M1308_Stage4", "M1308_Unstageable", "M1320"));
         }
 
         // M1332-M1334: Skip if M1330 = "0" (no stasis ulcers)
@@ -392,6 +414,11 @@ public class OasisAssessmentService {
             skipped.addAll(Arrays.asList("D0150_Q3", "D0150_Q4", "D0150_Q5", 
                 "D0150_Q6", "D0150_Q7", "D0150_Q8", "D0150_Q9", "D0160"));
         }
+        
+        // M2410: Skip if M2310 = "0" (no emergent care) - Note: field name is m2410EmergentCareReason
+        if ("0".equals(assessment.getM2310EmergentCare())) {
+            skipped.add("M2410");
+        }
 
         return skipped;
     }
@@ -400,17 +427,25 @@ public class OasisAssessmentService {
      * Calculate completion percentage (excluding skipped fields)
      */
     private int calculateCompletionPercentage(OasisAssessment assessment, List<String> skippedFields) {
-        // Define total required fields (simplified - in production, this would be more comprehensive)
-        int totalFields = 100; // Approximate total OASIS fields
-        int skippedCount = skippedFields.size();
-        int requiredFields = totalFields - skippedCount;
-
-        // Count filled fields (non-null, non-empty)
+        // Count all relevant fields (matching frontend calculation)
+        int totalFields = countTotalRelevantFields(skippedFields);
         int filledFields = countFilledFields(assessment, skippedFields);
 
         // Calculate percentage
-        if (requiredFields == 0) return 100;
-        return Math.min(100, (filledFields * 100) / requiredFields);
+        if (totalFields == 0) return 100;
+        return Math.min(100, (filledFields * 100) / totalFields);
+    }
+
+    /**
+     * Count total relevant fields (excluding skipped and optional fields)
+     */
+    private int countTotalRelevantFields(List<String> skippedFields) {
+        // Total required fields (matching frontend: ~77 required fields)
+        // Optional fields excluded: m0032RocDate, m1023OtherDiagnosis2-5Icd, m1017DiagnosisChange,
+        // m1028ActiveDiagnoses, m2401InterventionSynopsis, m2410DischargeTo, m2420DischargeDisposition
+        int total = 77; // Base count of required fields
+        // Subtract skipped fields from total
+        return total - skippedFields.size();
     }
 
     /**
@@ -419,7 +454,7 @@ public class OasisAssessmentService {
     private int countFilledFields(OasisAssessment assessment, List<String> skippedFields) {
         int count = 0;
 
-        // Section 1: Administrative
+        // Section 1: Administrative (12 fields)
         if (isNotEmpty(assessment.getM0010CmsCertNumber())) count++;
         if (isNotEmpty(assessment.getM0014BranchState())) count++;
         if (isNotEmpty(assessment.getM0016BranchId())) count++;
@@ -427,29 +462,106 @@ public class OasisAssessmentService {
         if (isNotEmpty(assessment.getM0020PatientId())) count++;
         if (assessment.getM0030SocDate() != null) count++;
         if (isNotEmpty(assessment.getM0063MedicareNumber())) count++;
+        if (isNotEmpty(assessment.getM0064Ssn())) count++;
+        if (isNotEmpty(assessment.getM0065MedicaidNumber())) count++;
         if (isNotEmpty(assessment.getM0069Gender())) count++;
+        if (isNotEmpty(assessment.getM0140RaceEthnicity())) count++;
+        if (isNotEmpty(assessment.getM1023OtherDiagnosis1Icd())) count++; // Only first other diagnosis is required
 
-        // Section 2: Diagnoses
+        // Section 2: Diagnoses (8 fields)
         if (isNotEmpty(assessment.getM1000InpatientFacility())) count++;
         if (!skippedFields.contains("M1005") && assessment.getM1005InpatientDischargeDate() != null) count++;
+        if (isNotEmpty(assessment.getM1011InpatientDiagnosis())) count++;
         if (isNotEmpty(assessment.getM1021PrimaryDiagnosisIcd())) count++;
+        if (isNotEmpty(assessment.getM1021PrimaryDiagnosisDesc())) count++;
 
-        // Section 5: Integumentary
+        // Section 3: Living (1 field)
+        if (isNotEmpty(assessment.getM1100LivingSituation())) count++;
+
+        // Section 4: Sensory (2 fields)
+        if (isNotEmpty(assessment.getM1200Vision())) count++;
+        if (isNotEmpty(assessment.getM1242Hearing())) count++;
+
+        // Section 5: Integumentary (10 fields, some may be skipped)
         if (isNotEmpty(assessment.getM1306PressureUlcer())) count++;
         if (!skippedFields.contains("M1307") && assessment.getM1307OldestStage2Date() != null) count++;
-        if (!skippedFields.contains("M1308") && assessment.getM1308Stage2Count() != null) count++;
+        if (!skippedFields.contains("M1308_Stage1") && assessment.getM1308Stage1Count() != null) count++;
+        if (!skippedFields.contains("M1308_Stage2") && assessment.getM1308Stage2Count() != null) count++;
+        if (!skippedFields.contains("M1308_Stage3") && assessment.getM1308Stage3Count() != null) count++;
+        if (!skippedFields.contains("M1308_Stage4") && assessment.getM1308Stage4Count() != null) count++;
+        if (!skippedFields.contains("M1308_Unstageable") && assessment.getM1308UnstageableCount() != null) count++;
+        if (!skippedFields.contains("M1320") && isNotEmpty(assessment.getM1320PressureUlcerStatus())) count++;
+        if (isNotEmpty(assessment.getM1330StasisUlcer())) count++;
+        if (!skippedFields.contains("M1332") && assessment.getM1332StasisUlcerCount() != null) count++;
+        if (!skippedFields.contains("M1334") && isNotEmpty(assessment.getM1334StasisUlcerStatus())) count++;
+        if (isNotEmpty(assessment.getM1340SurgicalWound())) count++;
+        if (!skippedFields.contains("M1342") && isNotEmpty(assessment.getM1342SurgicalWoundStatus())) count++;
 
-        // Section 8: Elimination
+        // Section 6: Respiratory (2 fields)
+        if (isNotEmpty(assessment.getM1400Dyspnea())) count++;
+        if (isNotEmpty(assessment.getM1410RespiratoryTreatments())) count++;
+
+        // Section 7: Cardiac (1 field)
+        if (isNotEmpty(assessment.getM1500HeartFailureSymptoms())) count++;
+
+        // Section 8: Elimination (5 fields, some may be skipped)
+        if (isNotEmpty(assessment.getM1600UtiTreatment())) count++;
         if (isNotEmpty(assessment.getM1610UrinaryIncontinence())) count++;
         if (!skippedFields.contains("M1615") && isNotEmpty(assessment.getM1615IncontinenceTiming())) count++;
+        if (isNotEmpty(assessment.getM1620BowelIncontinence())) count++;
+        if (isNotEmpty(assessment.getM1630Ostomy())) count++;
 
-        // Section 15: PHQ
+        // Section 9: Neurological/Emotional (6 fields)
+        if (isNotEmpty(assessment.getM1700CognitiveFunctioning())) count++;
+        if (isNotEmpty(assessment.getM1710WhenConfused())) count++;
+        if (isNotEmpty(assessment.getM1720WhenAnxious())) count++;
+        if (isNotEmpty(assessment.getM1730DepressionScreening())) count++;
+        if (isNotEmpty(assessment.getM1740PsychiatricSymptoms())) count++;
+        if (isNotEmpty(assessment.getM1745DisruptiveBehaviorFreq())) count++;
+
+        // Section 10: GG Items (4 fields - check if JSON strings contain data)
+        if (isJsonNotEmpty(assessment.getGg0100PriorFunctioning())) count++;
+        if (isJsonNotEmpty(assessment.getGg0110PriorDeviceUse())) count++;
+        if (isJsonNotEmpty(assessment.getGg0130SelfCare())) count++;
+        if (isJsonNotEmpty(assessment.getGg0170Mobility())) count++;
+
+        // Section 11: Medications (8 fields)
+        if (isNotEmpty(assessment.getM2001DrugRegimenReview())) count++;
+        if (isNotEmpty(assessment.getM2003MedicationFollowup())) count++;
+        if (isNotEmpty(assessment.getM2005MedicationIntervention())) count++;
+        if (isNotEmpty(assessment.getM2010HighRiskDrugEducation())) count++;
+        if (isNotEmpty(assessment.getM2015DrugEducationIntervention())) count++;
+        if (isNotEmpty(assessment.getM2020OralMedicationManagement())) count++;
+        if (isNotEmpty(assessment.getM2030InjectableMedicationMgmt())) count++;
+        if (isNotEmpty(assessment.getM2040PriorMedicationMgmt())) count++;
+
+        // Section 12: Care Management (2 fields)
+        if (isJsonNotEmpty(assessment.getM2102AssistanceTypes())) count++;
+        if (isNotEmpty(assessment.getM2110AssistanceFrequency())) count++;
+
+        // Section 13: Emergent Care (2 fields, one may be skipped)
+        if (isNotEmpty(assessment.getM2310EmergentCare())) count++;
+        if (!skippedFields.contains("M2410") && isNotEmpty(assessment.getM2410EmergentCareReason())) count++;
+
+        // Section 14: COVID (1 field)
+        if (isNotEmpty(assessment.getO0350CovidVaccination())) count++;
+
+        // Section 15: PHQ (10 fields, some may be skipped)
         if (isNotEmpty(assessment.getD0150Phq2Interest())) count++;
         if (isNotEmpty(assessment.getD0150Phq2Depressed())) count++;
         if (!skippedFields.contains("D0150_Q3") && isNotEmpty(assessment.getD0150Phq9Q3())) count++;
+        if (!skippedFields.contains("D0150_Q4") && isNotEmpty(assessment.getD0150Phq9Q4())) count++;
+        if (!skippedFields.contains("D0150_Q5") && isNotEmpty(assessment.getD0150Phq9Q5())) count++;
+        if (!skippedFields.contains("D0150_Q6") && isNotEmpty(assessment.getD0150Phq9Q6())) count++;
+        if (!skippedFields.contains("D0150_Q7") && isNotEmpty(assessment.getD0150Phq9Q7())) count++;
+        if (!skippedFields.contains("D0150_Q8") && isNotEmpty(assessment.getD0150Phq9Q8())) count++;
+        if (!skippedFields.contains("D0150_Q9") && isNotEmpty(assessment.getD0150Phq9Q9())) count++;
+        if (!skippedFields.contains("D0160") && assessment.getD0160Phq9TotalScore() != null) count++;
 
-        // Add more field checks as needed...
-        // This is a simplified version. In production, you'd iterate through all fields.
+        // Section 16: Immunization (3 fields)
+        if (isNotEmpty(assessment.getM1041InfluenzaVaccinePeriod())) count++;
+        if (isNotEmpty(assessment.getM1046InfluenzaVaccineReceived())) count++;
+        if (isNotEmpty(assessment.getM1051PneumococcalVaccine())) count++;
 
         return count;
     }
@@ -751,12 +863,14 @@ public class OasisAssessmentService {
     /**
      * Validate user can edit assessment
      */
-    private void validateCanEdit(OasisAssessment assessment) {
-        UserPrincipal userPrincipal = getCurrentUser();
+    private void validateCanEdit(OasisAssessment assessment, Long organizationId) {
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required");
+        }
 
         // Check organization access
-        if (!assessment.getOrganization().getId().equals(userPrincipal.getOrganizationId())) {
-            throw new RuntimeException("Access denied");
+        if (!assessment.getOrganization().getId().equals(organizationId)) {
+            throw new RuntimeException("Access denied: Assessment does not belong to your organization");
         }
 
         // Check if locked
@@ -782,6 +896,26 @@ public class OasisAssessmentService {
      */
     private boolean isNotEmpty(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    /**
+     * Check if JSON string contains data (not empty object or null)
+     */
+    private boolean isJsonNotEmpty(String jsonString) {
+        if (jsonString == null || jsonString.trim().isEmpty()) {
+            return false;
+        }
+        try {
+            // Parse JSON and check if it has any properties
+            Object obj = objectMapper.readValue(jsonString, Object.class);
+            if (obj instanceof java.util.Map) {
+                return !((java.util.Map<?, ?>) obj).isEmpty();
+            }
+            return obj != null;
+        } catch (Exception e) {
+            // If it's not valid JSON, treat as empty
+            return false;
+        }
     }
 
     /**
