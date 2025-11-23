@@ -39,8 +39,13 @@ public class PlanOfCareService {
         OasisAssessmentComplete oasis = oasisRepository.findById(oasisId)
             .orElseThrow(() -> new RuntimeException("OASIS assessment not found"));
             
-        if (!"APPROVED".equals(oasis.getStatus())) {
-            throw new RuntimeException("OASIS assessment must be approved before generating POC");
+        // Allow POC generation from DRAFT, SUBMITTED, APPROVED, or COMPLETED OASIS
+        // This enables RN to create OASIS and POC together before submission
+        if (!"DRAFT".equals(oasis.getStatus()) && 
+            !"SUBMITTED".equals(oasis.getStatus()) && 
+            !"APPROVED".equals(oasis.getStatus()) && 
+            !"COMPLETED".equals(oasis.getStatus())) {
+            throw new RuntimeException("OASIS assessment must be in DRAFT, SUBMITTED, APPROVED, or COMPLETED status to generate POC");
         }
         
         // Check if POC already exists for this OASIS
@@ -186,6 +191,10 @@ public class PlanOfCareService {
         poc = pocRepository.save(poc);
         
         log.info("Successfully created Plan of Care: {}", poc.getPocNumber());
+        
+        // Tasks will be auto-generated only after QA approves the POC
+        // This ensures tasks are only created for approved care plans
+        
         return convertToDTO(poc);
     }
     

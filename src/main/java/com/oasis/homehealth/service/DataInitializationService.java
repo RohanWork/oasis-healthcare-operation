@@ -216,7 +216,7 @@ public class DataInitializationService implements CommandLineRunner {
                 // OASIS Management
                 "OASIS_CREATE", "OASIS_READ", "OASIS_UPDATE", "OASIS_SUBMIT", "OASIS_APPROVE",
                 // Plan of Care
-                "POC_READ", "POC_APPROVE",
+                "POC_CREATE", "POC_READ", "POC_UPDATE", "POC_GENERATE", "POC_APPROVE",
                 // Visit Notes
                 "VISIT_READ", "VISIT_UPDATE", "VISIT_APPROVE",
                 // Reports
@@ -228,7 +228,9 @@ public class DataInitializationService implements CommandLineRunner {
                 "Handles patient intake and referrals", 4);
         addPermissionsToRole(intakeCoordinator, Arrays.asList(
                 "PATIENT_CREATE", "PATIENT_READ", "PATIENT_UPDATE",
-                "EPISODE_CREATE", "EPISODE_READ", "EPISODE_UPDATE"
+                "EPISODE_CREATE", "EPISODE_READ", "EPISODE_UPDATE",
+                // OASIS Management - Intake coordinators can create and update OASIS during intake
+                "OASIS_CREATE", "OASIS_READ", "OASIS_UPDATE", "OASIS_SUBMIT"
         ));
 
         // Registered Nurse (RN)

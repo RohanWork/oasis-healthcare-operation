@@ -201,9 +201,12 @@ public class OasisAssessmentService {
         assessment.setQaComments(request.getComments());
 
         if ("APPROVE".equals(request.getAction())) {
-            assessment.setStatus("APPROVED");
+            assessment.setStatus("COMPLETED");
+            
+            // Update patient status from PENDING to ACTIVE when OASIS is completed
+            updatePatientStatusIfPending(assessment.getPatient());
             assessment.setLockedAt(LocalDateTime.now());
-            log.info("OASIS assessment APPROVED: {}", request.getAssessmentId());
+            log.info("OASIS assessment COMPLETED (approved by QA): {}", request.getAssessmentId());
         } else if ("REJECT".equals(request.getAction())) {
             assessment.setStatus("REJECTED");
             log.info("OASIS assessment REJECTED: {}", request.getAssessmentId());
@@ -309,6 +312,35 @@ public class OasisAssessmentService {
             log.error("Unexpected error in getPendingQAReviews", e);
             throw new RuntimeException("Failed to retrieve pending QA reviews: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Get rejected assessments for a specific clinician
+     * Checks both clinician and submittedBy fields since assessments might be created by different users
+     */
+    @Transactional(readOnly = true)
+    public List<OasisAssessmentDTO> getRejectedAssessmentsByClinician(Long clinicianId, Long organizationId) {
+        log.info("Fetching rejected assessments for clinician: {} in organization: {}", clinicianId, organizationId);
+        
+        // Get assessments where clinician matches OR submittedBy matches
+        List<OasisAssessment> assessmentsByClinician = oasisRepository.findByClinicianIdAndStatusAndIsDeletedFalse(clinicianId, "REJECTED");
+        
+        // Also check assessments submitted by this user (in case clinicianId wasn't set)
+        List<OasisAssessment> allRejected = oasisRepository.findByOrganizationIdAndStatusAndIsDeletedFalse(organizationId, "REJECTED");
+        
+        // Filter to include assessments where clinician OR submittedBy matches the user
+        List<OasisAssessment> filtered = allRejected.stream()
+            .filter(a -> {
+                boolean clinicianMatch = a.getClinician() != null && a.getClinician().getId().equals(clinicianId);
+                boolean submittedByMatch = a.getSubmittedBy() != null && a.getSubmittedBy().getId().equals(clinicianId);
+                return clinicianMatch || submittedByMatch;
+            })
+            .collect(Collectors.toList());
+        
+        log.info("Found {} rejected assessments for clinician: {} (checked both clinician and submittedBy)", filtered.size(), clinicianId);
+        return filtered.stream()
+            .map(this::mapToDTO)
+            .collect(Collectors.toList());
     }
 
     /**
@@ -941,6 +973,18 @@ public class OasisAssessmentService {
         } catch (JsonProcessingException e) {
             log.error("Error parsing JSON", e);
             return null;
+        }
+    }
+    
+    /**
+     * Update patient status from PENDING to ACTIVE when care begins
+     */
+    private void updatePatientStatusIfPending(Patient patient) {
+        if (patient != null && "PENDING".equals(patient.getStatus())) {
+            patient.setStatus("ACTIVE");
+            patient.setStatusReason("Care started - OASIS assessment completed");
+            patientRepository.save(patient);
+            log.info("Patient {} status updated from PENDING to ACTIVE", patient.getMedicalRecordNumber());
         }
     }
 }

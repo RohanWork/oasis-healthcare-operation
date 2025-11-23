@@ -28,7 +28,7 @@ public class PlanOfCareController {
     private final PlanOfCareService pocService;
 
     @PostMapping("/generate/{oasisId}")
-    @PreAuthorize("hasAnyAuthority('POC_GENERATE', 'POC_CREATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('POC_GENERATE', 'POC_CREATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_ORG_ADMIN', 'ROLE_QA_NURSE', 'ROLE_RN', 'ROLE_PT')")
     @Operation(summary = "Generate POC from OASIS", description = "Auto-generate Plan of Care from approved OASIS assessment")
     public ResponseEntity<PlanOfCareDTO> generateFromOASIS(@PathVariable Long oasisId) {
         PlanOfCareDTO poc = pocService.generateFromOASIS(oasisId);
@@ -36,7 +36,7 @@ public class PlanOfCareController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('POC_CREATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAuthority('POC_CREATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_ORG_ADMIN', 'ROLE_QA_NURSE', 'ROLE_RN', 'ROLE_PT')")
     @Operation(summary = "Create Plan of Care", description = "Create a new Plan of Care manually")
     public ResponseEntity<PlanOfCareDTO> createPOC(
             @Valid @RequestBody PlanOfCareRequest request,
@@ -47,7 +47,7 @@ public class PlanOfCareController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('POC_UPDATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_ORG_ADMIN')")
+    @PreAuthorize("hasAuthority('POC_UPDATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_ORG_ADMIN', 'ROLE_QA_NURSE', 'ROLE_RN', 'ROLE_PT')")
     @Operation(summary = "Update Plan of Care", description = "Update an existing Plan of Care")
     public ResponseEntity<PlanOfCareDTO> updatePOC(
             @PathVariable Long id,

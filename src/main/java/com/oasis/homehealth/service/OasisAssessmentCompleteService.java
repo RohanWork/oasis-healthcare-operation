@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.oasis.homehealth.dto.OasisAssessmentCompleteDTO;
 import com.oasis.homehealth.dto.OasisAssessmentCompleteRequest;
 import com.oasis.homehealth.dto.OasisQARequest;
+import com.oasis.homehealth.dto.TaskGenerationRequest;
 import com.oasis.homehealth.entity.*;
 import com.oasis.homehealth.repository.*;
 import com.oasis.homehealth.security.UserPrincipal;
@@ -36,6 +37,8 @@ public class OasisAssessmentCompleteService {
     private final OrganizationRepository organizationRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
+    private final PlanOfCareRepository planOfCareRepository;
+    private final TaskSchedulerService taskSchedulerService;
 
     /**
      * Create a new OASIS assessment
@@ -94,7 +97,11 @@ public class OasisAssessmentCompleteService {
         // Save
         assessment = oasisRepository.save(assessment);
 
-        log.info("Complete OASIS-E1 assessment created with ID: {}", assessment.getId());
+        log.info("Complete OASIS-E1 assessment created with ID: {}, PatientId: {}, EpisodeId: {}, OrganizationId: {}", 
+            assessment.getId(), 
+            assessment.getPatient() != null ? assessment.getPatient().getId() : "null",
+            assessment.getEpisode() != null ? assessment.getEpisode().getId() : "null",
+            assessment.getOrganization() != null ? assessment.getOrganization().getId() : "null");
         return mapToDTO(assessment);
     }
 
@@ -181,6 +188,38 @@ public class OasisAssessmentCompleteService {
             assessment.setStatus("APPROVED");
             assessment.setLockedAt(LocalDateTime.now());
             log.info("Complete OASIS-E1 assessment APPROVED: {}", request.getAssessmentId());
+            
+            // If there's an associated POC that's pending approval, auto-approve it and generate tasks
+            try {
+                Optional<PlanOfCare> associatedPOC = planOfCareRepository.findByOasisAssessmentId(assessment.getId());
+                if (associatedPOC.isPresent() && "PENDING_APPROVAL".equals(associatedPOC.get().getStatus())) {
+                    log.info("Auto-approving associated POC {} after OASIS approval", associatedPOC.get().getId());
+                    PlanOfCare poc = associatedPOC.get();
+                    poc.setStatus("APPROVED");
+                    // Reuse the reviewer variable already defined above
+                    poc.setApprovedBy(reviewer);
+                    poc.setApprovedAt(LocalDateTime.now());
+                    poc = planOfCareRepository.save(poc);
+                    
+                    // Auto-generate tasks from approved POC
+                    try {
+                        TaskGenerationRequest taskRequest = TaskGenerationRequest.builder()
+                                .planOfCareId(poc.getId())
+                                .startDate(poc.getStartDate())
+                                .assignToClinicianId(assessment.getPatient().getAdmittingClinician() != null ? 
+                                    assessment.getPatient().getAdmittingClinician().getId() : null)
+                                .build();
+                        taskSchedulerService.generateTasksFromPOC(taskRequest);
+                        log.info("Tasks auto-generated from approved POC: {}", poc.getPocNumber());
+                    } catch (Exception e) {
+                        log.error("Failed to auto-generate tasks from POC: {}", e.getMessage());
+                        // Don't fail POC approval if task generation fails
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Could not auto-approve associated POC: {}", e.getMessage());
+                // Don't fail OASIS approval if POC approval fails
+            }
         } else if ("REJECT".equals(request.getAction())) {
             assessment.setStatus("REJECTED");
             log.info("Complete OASIS-E1 assessment REJECTED: {}", request.getAssessmentId());
@@ -213,8 +252,42 @@ public class OasisAssessmentCompleteService {
      */
     @Transactional(readOnly = true)
     public List<OasisAssessmentCompleteDTO> getAssessmentsByPatient(Long patientId) {
+        log.info("Fetching assessments for patient: {}", patientId);
         List<OasisAssessmentComplete> assessments = oasisRepository.findByPatientIdAndDeletedFalse(patientId);
+        log.info("Found {} assessments for patient {}", assessments.size(), patientId);
+        if (assessments.size() > 0) {
+            assessments.forEach(a -> log.debug("Assessment ID: {}, Status: {}, EpisodeId: {}, PatientId: {}", 
+                a.getId(), a.getStatus(), a.getEpisode() != null ? a.getEpisode().getId() : "null", 
+                a.getPatient() != null ? a.getPatient().getId() : "null"));
+        }
         return assessments.stream().map(this::mapToDTO).collect(Collectors.toList());
+    }
+
+    /**
+     * Get rejected assessments for the current user (RN/PT)
+     * Checks both clinician and submittedBy fields
+     */
+    @Transactional(readOnly = true)
+    public List<OasisAssessmentCompleteDTO> getRejectedAssessmentsByClinician(Long clinicianId, Long organizationId) {
+        log.info("Fetching rejected complete OASIS assessments for clinician: {} in organization: {}", clinicianId, organizationId);
+        
+        // Get all rejected assessments for the organization
+        List<OasisAssessmentComplete> allRejected = oasisRepository.findByStatusAndOrganizationId("REJECTED", organizationId);
+        
+        // Filter to include assessments where clinician OR submittedBy matches the user
+        List<OasisAssessmentComplete> filtered = allRejected.stream()
+            .filter(a -> {
+                boolean clinicianMatch = a.getClinician() != null && a.getClinician().getId().equals(clinicianId);
+                boolean submittedByMatch = a.getSubmittedBy() != null && a.getSubmittedBy().getId().equals(clinicianId);
+                return clinicianMatch || submittedByMatch;
+            })
+            .collect(Collectors.toList());
+        
+        log.info("Found {} rejected complete OASIS assessments for clinician: {} (checked both clinician and submittedBy)", 
+            filtered.size(), clinicianId);
+        return filtered.stream()
+            .map(this::mapToDTO)
+            .collect(Collectors.toList());
     }
 
     /**
