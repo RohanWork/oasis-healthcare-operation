@@ -46,8 +46,10 @@ public class TaskSchedulerService {
         PlanOfCare poc = pocRepository.findById(request.getPlanOfCareId())
             .orElseThrow(() -> new RuntimeException("Plan of Care not found"));
             
-        if (!"APPROVED".equals(poc.getStatus()) && !"ACTIVE".equals(poc.getStatus())) {
-            throw new RuntimeException("Plan of Care must be approved before generating tasks");
+        // Allow task generation for DRAFT, APPROVED, or ACTIVE POCs
+        // DRAFT is allowed because tasks are auto-generated when POC is created
+        if (!"DRAFT".equals(poc.getStatus()) && !"APPROVED".equals(poc.getStatus()) && !"ACTIVE".equals(poc.getStatus())) {
+            throw new RuntimeException("Plan of Care must be in DRAFT, APPROVED, or ACTIVE status before generating tasks");
         }
         
         // Check if tasks already generated
@@ -69,6 +71,10 @@ public class TaskSchedulerService {
             assignedClinician = poc.getPatient().getAdmittingClinician();
         }
         
+        // Get current task count to use as base for unique task numbers
+        long baseTaskCount = taskRepository.count();
+        int taskSequence = 0; // Counter for tasks in this batch
+        
         // Generate tasks for each frequency in the POC
         for (PlanOfCareFrequency frequency : poc.getFrequencies()) {
             if (Boolean.FALSE.equals(frequency.getIsActive())) {
@@ -83,14 +89,16 @@ public class TaskSchedulerService {
             }
             
             List<Task> disciplineTasks = generateTasksForFrequency(
-                poc, frequency, startDate, assignedClinician);
+                poc, frequency, startDate, assignedClinician, baseTaskCount, taskSequence);
             generatedTasks.addAll(disciplineTasks);
+            taskSequence += disciplineTasks.size(); // Increment sequence counter
         }
         
         // Generate OASIS recertification task (60 days from POC start)
         if (poc.getEndDate() != null) {
-            Task recertTask = generateOASISRecertTask(poc, assignedClinician);
+            Task recertTask = generateOASISRecertTask(poc, assignedClinician, baseTaskCount + taskSequence);
             generatedTasks.add(recertTask);
+            taskSequence++; // Increment for recert task
         }
         
         // Save all tasks
@@ -107,7 +115,8 @@ public class TaskSchedulerService {
      * Generate tasks for a specific frequency (e.g., RN: 3W8)
      */
     private List<Task> generateTasksForFrequency(PlanOfCare poc, PlanOfCareFrequency frequency, 
-                                                   LocalDate startDate, User assignedClinician) {
+                                                   LocalDate startDate, User assignedClinician,
+                                                   long baseTaskCount, int startSequence) {
         List<Task> tasks = new ArrayList<>();
         
         Integer visitsPerWeek = frequency.getVisitsPerWeek();
@@ -124,6 +133,7 @@ public class TaskSchedulerService {
         // Distribute visits across weeks
         LocalDate currentDate = startDate;
         int visitsCreated = 0;
+        int sequenceCounter = startSequence;
         
         for (int week = 0; week < numberOfWeeks && visitsCreated < totalVisits; week++) {
             // Distribute visits within the week
@@ -132,16 +142,22 @@ public class TaskSchedulerService {
             for (LocalDate visitDate : weekDates) {
                 if (visitsCreated >= totalVisits) break;
                 
+                // Use disciplineDescription if available, otherwise use disciplineType
+                String disciplineName = (frequency.getDisciplineDescription() != null && 
+                                        !frequency.getDisciplineDescription().trim().isEmpty())
+                    ? frequency.getDisciplineDescription()
+                    : frequency.getDisciplineType();
+                
                 Task task = Task.builder()
                     .patient(poc.getPatient())
                     .episode(poc.getEpisode())
                     .planOfCare(poc)
                     .organization(poc.getOrganization())
-                    .taskNumber(generateTaskNumber(poc.getOrganization()))
+                    .taskNumber(generateTaskNumber(poc.getOrganization(), baseTaskCount + sequenceCounter))
                     .taskType(frequency.getDisciplineType() + "_VISIT")
-                    .title(frequency.getDisciplineDescription() + " Visit")
+                    .title(disciplineName + " Visit")
                     .description(String.format("%s visit for %s", 
-                        frequency.getDisciplineDescription(), 
+                        disciplineName, 
                         poc.getPatient().getFullName()))
                     .scheduledDate(visitDate)
                     .estimatedDurationMinutes(frequency.getEstimatedMinutesPerVisit())
@@ -157,6 +173,7 @@ public class TaskSchedulerService {
                 
                 tasks.add(task);
                 visitsCreated++;
+                sequenceCounter++; // Increment for next task
             }
             
             // Move to next week
@@ -220,7 +237,7 @@ public class TaskSchedulerService {
     /**
      * Generate OASIS recertification task (60 days from POC start)
      */
-    private Task generateOASISRecertTask(PlanOfCare poc, User assignedClinician) {
+    private Task generateOASISRecertTask(PlanOfCare poc, User assignedClinician, long sequenceNumber) {
         // Recert should be completed ~5 days before POC ends
         LocalDate recertDate = poc.getEndDate().minusDays(5);
         
@@ -229,7 +246,7 @@ public class TaskSchedulerService {
             .episode(poc.getEpisode())
             .planOfCare(poc)
             .organization(poc.getOrganization())
-            .taskNumber(generateTaskNumber(poc.getOrganization()))
+            .taskNumber(generateTaskNumber(poc.getOrganization(), sequenceNumber))
             .taskType("OASIS_RECERT")
             .title("OASIS Recertification Assessment")
             .description("Complete OASIS recertification assessment for " + poc.getPatient().getFullName())
@@ -413,17 +430,25 @@ public class TaskSchedulerService {
      * Start a task (mark as IN_PROGRESS)
      */
     @Transactional
-    public TaskDTO startTask(Long id) {
+    public TaskDTO startTask(Long id, Long organizationId) {
         Task task = taskRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Task not found"));
         
-        if (!"SCHEDULED".equals(task.getStatus()) && !"RESCHEDULED".equals(task.getStatus())) {
-            throw new RuntimeException("Task cannot be started. Current status: " + task.getStatus());
+        // Validate organization access
+        if (organizationId != null && !task.getOrganization().getId().equals(organizationId)) {
+            throw new RuntimeException("Task does not belong to your organization");
+        }
+        
+        if (!"SCHEDULED".equals(task.getStatus()) && !"RESCHEDULED".equals(task.getStatus()) && !"PENDING".equals(task.getStatus())) {
+            throw new RuntimeException("Task cannot be started. Current status: " + task.getStatus() + ". Task must be in SCHEDULED, RESCHEDULED, or PENDING status.");
         }
         
         task.setStatus("IN_PROGRESS");
         task.setActualStartTime(LocalDateTime.now());
-        taskRepository.save(task);
+        task = taskRepository.save(task);
+        
+        // Update patient status from PENDING to ACTIVE when first task is started
+        updatePatientStatusIfPending(task.getPatient());
         
         return convertToDTO(task);
     }
@@ -432,9 +457,14 @@ public class TaskSchedulerService {
      * Complete task
      */
     @Transactional
-    public TaskDTO completeTask(Long id, String completionNotes) {
+    public TaskDTO completeTask(Long id, String completionNotes, Long organizationId) {
         Task task = taskRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Task not found"));
+        
+        // Validate organization access
+        if (organizationId != null && !task.getOrganization().getId().equals(organizationId)) {
+            throw new RuntimeException("Task does not belong to your organization");
+        }
             
         UserPrincipal currentUser = getCurrentUser();
         User completedBy = userRepository.findById(currentUser.getId()).orElse(null);
@@ -464,9 +494,17 @@ public class TaskSchedulerService {
      * Get task by ID
      */
     @Transactional(readOnly = true)
-    public TaskDTO getTaskById(Long id) {
+    @Transactional(readOnly = true)
+    public TaskDTO getTaskById(Long id, Long organizationId) {
         Task task = taskRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("Task not found"));
+        
+        // Validate organization access (if organizationId is provided)
+        // SYSTEM_ADMIN can access tasks from any organization (organizationId will be null)
+        if (organizationId != null && !task.getOrganization().getId().equals(organizationId)) {
+            throw new RuntimeException("Task does not belong to your organization");
+        }
+        
         return convertToDTO(task);
     }
     
@@ -607,10 +645,18 @@ public class TaskSchedulerService {
     // ==================== HELPER METHODS ====================
     
     private String generateTaskNumber(Organization organization) {
-        String orgName = organization.getOrganizationName() != null ? organization.getOrganizationName() : "ORG";
-        String prefix = orgName.substring(0, Math.min(3, orgName.length())).toUpperCase();
-        String timestamp = String.valueOf(System.currentTimeMillis());
-        return "TSK-" + prefix + "-" + timestamp.substring(timestamp.length() - 8);
+        // Use count-based approach for single task generation
+        long count = taskRepository.count() + 1;
+        return generateTaskNumber(organization, count);
+    }
+    
+    private String generateTaskNumber(Organization organization, long sequenceNumber) {
+        String orgCode = organization.getOrganizationCode() != null ? 
+            organization.getOrganizationCode() : 
+            (organization.getOrganizationName() != null ? 
+                organization.getOrganizationName().substring(0, Math.min(3, organization.getOrganizationName().length())).toUpperCase() : 
+                "ORG");
+        return String.format("TSK-%s-%08d", orgCode, sequenceNumber);
     }
     
     private TaskDTO convertToDTO(Task task) {
@@ -685,6 +731,102 @@ public class TaskSchedulerService {
             .canBeCancelled(task.canBeCancelled())
             .needsQAReview(task.needsQAReview())
             .build();
+    }
+    
+    /**
+     * Get tasks pending QA review
+     */
+    @Transactional(readOnly = true)
+    public List<TaskDTO> getPendingQAReview(Long organizationId) {
+        log.info("Fetching tasks pending QA review for organization: {}", organizationId);
+        
+        List<Task> tasks;
+        if (organizationId == null) {
+            // SYSTEM_ADMIN can see all pending tasks
+            tasks = taskRepository.findByStatusAndIsDeletedFalse("COMPLETED_PENDING_QA");
+        } else {
+            tasks = taskRepository.findPendingQAReview(organizationId);
+        }
+        
+        log.info("Found {} tasks pending QA review", tasks.size());
+        return tasks.stream()
+            .map(this::convertToDTO)
+            .collect(Collectors.toList());
+    }
+    
+    /**
+     * Approve task (QA approval)
+     */
+    @Transactional
+    public TaskDTO approveTask(Long id, Long organizationId) {
+        Task task = taskRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Task not found"));
+        
+        // Validate organization access
+        if (organizationId != null && !task.getOrganization().getId().equals(organizationId)) {
+            throw new RuntimeException("Task does not belong to your organization");
+        }
+        
+        if (!"COMPLETED_PENDING_QA".equals(task.getStatus())) {
+            throw new RuntimeException("Only tasks with status COMPLETED_PENDING_QA can be approved");
+        }
+        
+        UserPrincipal currentUser = getCurrentUser();
+        User approvedBy = userRepository.findById(currentUser.getId())
+            .orElseThrow(() -> new RuntimeException("User not found"));
+        
+        task.setStatus("QA_APPROVED");
+        task.setQaReviewedBy(approvedBy);
+        task.setQaReviewedAt(LocalDateTime.now());
+        task.setQaStatus("APPROVED");
+        task = taskRepository.save(task);
+        
+        log.info("Task {} approved by QA", task.getTaskNumber());
+        return convertToDTO(task);
+    }
+    
+    /**
+     * Reject task (QA rejection - return for correction)
+     */
+    @Transactional
+    public TaskDTO rejectTask(Long id, String rejectionReason, Long organizationId) {
+        Task task = taskRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Task not found"));
+        
+        // Validate organization access
+        if (organizationId != null && !task.getOrganization().getId().equals(organizationId)) {
+            throw new RuntimeException("Task does not belong to your organization");
+        }
+        
+        if (!"COMPLETED_PENDING_QA".equals(task.getStatus())) {
+            throw new RuntimeException("Only tasks with status COMPLETED_PENDING_QA can be rejected");
+        }
+        
+        UserPrincipal currentUser = getCurrentUser();
+        User rejectedBy = userRepository.findById(currentUser.getId())
+            .orElseThrow(() -> new RuntimeException("User not found"));
+        
+        task.setStatus("RETURNED_FOR_CORRECTION");
+        task.setQaReviewedBy(rejectedBy);
+        task.setQaReviewedAt(LocalDateTime.now());
+        task.setQaComments(rejectionReason);
+        task.setQaStatus("RETURNED");
+        task = taskRepository.save(task);
+        
+        log.info("Task {} rejected by QA: {}", task.getTaskNumber(), rejectionReason);
+        return convertToDTO(task);
+    }
+    
+    /**
+     * Update patient status from PENDING to ACTIVE when care begins
+     */
+    private void updatePatientStatusIfPending(Patient patient) {
+        if (patient != null && "PENDING".equals(patient.getStatus())) {
+            patient.setStatus("ACTIVE");
+            patient.setStatusReason("Care started - first task initiated");
+            patientRepository.save(patient);
+            log.info("Patient {} status updated from PENDING to ACTIVE", patient.getMedicalRecordNumber());
+        }
     }
     
     private UserPrincipal getCurrentUser() {

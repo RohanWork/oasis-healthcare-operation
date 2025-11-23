@@ -81,6 +81,10 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
            "AND t.status = 'COMPLETED_PENDING_QA' " +
            "AND t.isDeleted = false ORDER BY t.completedAt ASC")
     List<Task> findPendingQAReview(@Param("organizationId") Long organizationId);
+    
+    // Find tasks by status (for SYSTEM_ADMIN)
+    @Query("SELECT t FROM Task t WHERE t.status = :status AND t.isDeleted = false ORDER BY t.completedAt ASC")
+    List<Task> findByStatusAndIsDeletedFalse(@Param("status") String status);
 
     // Find tasks for clinician today
     @Query("SELECT t FROM Task t WHERE t.assignedTo.id = :clinicianId " +

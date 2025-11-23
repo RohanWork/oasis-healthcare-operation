@@ -1,6 +1,7 @@
 com\oasis\homehealth\dto\OasisAssessmentDTO$OasisAssessmentDTOBuilder.class
 com\oasis\homehealth\entity\embedded\SectionF.class
 com\oasis\homehealth\entity\embedded\SectionK$SectionKBuilder.class
+com\oasis\homehealth\entity\Referral$ReferralBuilder.class
 com\oasis\homehealth\dto\TaskRequest$TaskRequestBuilder.class
 com\oasis\homehealth\entity\PhysicianOrder.class
 com\oasis\homehealth\entity\PlanOfCareFrequency$PlanOfCareFrequencyBuilder.class
@@ -52,6 +53,7 @@ com\oasis\homehealth\entity\embedded\SectionE.class
 com\oasis\homehealth\dto\TaskGenerationRequest.class
 com\oasis\homehealth\dto\PlanOfCareFrequencyDTO$PlanOfCareFrequencyDTOBuilder.class
 com\oasis\homehealth\entity\OasisAssessment.class
+com\oasis\homehealth\service\ReferralService.class
 com\oasis\homehealth\dto\PlanOfCareGoalRequest$PlanOfCareGoalRequestBuilder.class
 com\oasis\homehealth\entity\embedded\SectionM.class
 com\oasis\homehealth\security\JwtTokenProvider.class
@@ -70,6 +72,7 @@ com\oasis\homehealth\dto\EpisodeDTO.class
 com\oasis\homehealth\OasisApplication.class
 com\oasis\homehealth\service\OasisAssessmentService$5.class
 com\oasis\homehealth\entity\PhysicianOrder$PhysicianOrderBuilder.class
+com\oasis\homehealth\repository\ReferralRepository.class
 com\oasis\homehealth\controller\TaskController.class
 com\oasis\homehealth\service\OasisAssessmentService$3.class
 com\oasis\homehealth\dto\auth\LoginRequest.class
@@ -96,6 +99,7 @@ com\oasis\homehealth\controller\OasisAssessmentController.class
 com\oasis\homehealth\dto\EpisodeRequest.class
 com\oasis\homehealth\entity\embedded\SectionN.class
 com\oasis\homehealth\entity\BillingClaim$BillingClaimBuilder.class
+com\oasis\homehealth\dto\ReferralRequest$ReferralRequestBuilder.class
 com\oasis\homehealth\service\EpisodeService.class
 com\oasis\homehealth\service\OasisAssessmentService.class
 com\oasis\homehealth\entity\embedded\SectionGG.class
@@ -113,9 +117,11 @@ com\oasis\homehealth\controller\AuthController.class
 com\oasis\homehealth\entity\embedded\SectionI.class
 com\oasis\homehealth\dto\OasisAssessmentDTO.class
 com\oasis\homehealth\dto\OrganizationDTO.class
+com\oasis\homehealth\dto\ReferralRequest.class
 com\oasis\homehealth\repository\PlanOfCareInterventionRepository.class
 com\oasis\homehealth\entity\PlanOfCareGoal.class
 com\oasis\homehealth\entity\embedded\SectionQ$SectionQBuilder.class
+com\oasis\homehealth\entity\Referral.class
 com\oasis\homehealth\dto\PhysicianOrderDTO$PhysicianOrderDTOBuilder.class
 com\oasis\homehealth\dto\RoleDTO$RoleDTOBuilder.class
 com\oasis\homehealth\repository\PlanOfCareFrequencyRepository.class
@@ -161,6 +167,7 @@ com\oasis\homehealth\entity\Permission$PermissionBuilder.class
 com\oasis\homehealth\dto\InsuranceDTO$InsuranceDTOBuilder.class
 com\oasis\homehealth\dto\PlanOfCareInterventionRequest$PlanOfCareInterventionRequestBuilder.class
 com\oasis\homehealth\dto\auth\LoginResponse.class
+com\oasis\homehealth\dto\ReferralDTO$ReferralDTOBuilder.class
 com\oasis\homehealth\security\UserPrincipal.class
 com\oasis\homehealth\dto\UserDTO.class
 com\oasis\homehealth\service\PlanOfCareService.class
@@ -168,6 +175,7 @@ com\oasis\homehealth\security\JwtAuthenticationFilter.class
 com\oasis\homehealth\repository\OrganizationRepository.class
 com\oasis\homehealth\entity\Role.class
 com\oasis\homehealth\entity\VisitNote$VisitNoteBuilder.class
+com\oasis\homehealth\controller\ReferralController.class
 com\oasis\homehealth\entity\OasisAssessmentComplete$OasisAssessmentCompleteBuilder.class
 com\oasis\homehealth\entity\BillingClaim.class
 com\oasis\homehealth\entity\User.class
@@ -191,6 +199,7 @@ com\oasis\homehealth\dto\BillingClaimDTO$BillingClaimDTOBuilder.class
 com\oasis\homehealth\dto\PlanOfCareInterventionDTO.class
 com\oasis\homehealth\entity\embedded\SectionD$SectionDBuilder.class
 com\oasis\homehealth\repository\RoleRepository.class
+com\oasis\homehealth\dto\ReferralDTO.class
 com\oasis\homehealth\service\BillingService.class
 com\oasis\homehealth\entity\embedded\SectionG.class
 com\oasis\homehealth\entity\Insurance.class

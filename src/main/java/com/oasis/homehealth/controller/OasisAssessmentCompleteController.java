@@ -9,8 +9,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import com.oasis.homehealth.security.UserPrincipal;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 
@@ -120,6 +123,28 @@ public class OasisAssessmentCompleteController {
         log.info("Deleting complete OASIS-E1 assessment: {}", id);
         oasisService.deleteAssessment(id);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Get my rejected assessments (for RN/PT users)
+     */
+    @GetMapping("/my/rejected")
+    @PreAuthorize("hasAnyRole('ROLE_RN', 'ROLE_PT', 'ROLE_OT', 'ROLE_ORG_ADMIN', 'ROLE_SYSTEM_ADMIN', 'ROLE_INTAKE_COORDINATOR')")
+    public ResponseEntity<List<OasisAssessmentCompleteDTO>> getMyRejectedAssessments(
+            @AuthenticationPrincipal UserPrincipal currentUser,
+            HttpServletRequest httpRequest) {
+        log.info("REST request to get rejected complete OASIS assessments for user: {}", 
+            currentUser != null ? currentUser.getUsername() : "unknown");
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required. Please select an organization.");
+        }
+        Long userId = currentUser != null ? currentUser.getId() : null;
+        if (userId == null) {
+            throw new RuntimeException("User ID is required.");
+        }
+        List<OasisAssessmentCompleteDTO> result = oasisService.getRejectedAssessmentsByClinician(userId, organizationId);
+        return ResponseEntity.ok(result);
     }
 
     /**

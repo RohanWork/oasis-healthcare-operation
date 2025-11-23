@@ -30,7 +30,7 @@ public class OasisAssessmentController {
     private final OasisAssessmentService oasisService;
 
     @PostMapping
-    @PreAuthorize("hasAuthority('OASIS_CREATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_RN', 'ROLE_PT', 'ROLE_QA_NURSE')")
+    @PreAuthorize("hasAuthority('OASIS_CREATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_RN', 'ROLE_PT', 'ROLE_QA_NURSE', 'ROLE_INTAKE_COORDINATOR')")
     @Operation(summary = "Create new OASIS assessment", description = "Create a new OASIS-E1 assessment for a patient")
     public ResponseEntity<OasisAssessmentDTO> createAssessment(
             @Valid @RequestBody OasisAssessmentRequest request,
@@ -45,7 +45,7 @@ public class OasisAssessmentController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('OASIS_UPDATE') or hasRole('ROLE_SYSTEM_ADMIN')")
+    @PreAuthorize("hasAuthority('OASIS_UPDATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_INTAKE_COORDINATOR')")
     @Operation(summary = "Update OASIS assessment", description = "Update an existing OASIS assessment (manual save)")
     public ResponseEntity<OasisAssessmentDTO> updateAssessment(
             @PathVariable Long id,
@@ -61,7 +61,7 @@ public class OasisAssessmentController {
     }
 
     @PostMapping("/{id}/auto-save")
-    @PreAuthorize("hasAuthority('OASIS_UPDATE') or hasRole('ROLE_SYSTEM_ADMIN')")
+    @PreAuthorize("hasAuthority('OASIS_UPDATE') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_INTAKE_COORDINATOR')")
     @Operation(summary = "Auto-save OASIS assessment", description = "Auto-save assessment (called every 15 seconds)")
     public ResponseEntity<OasisAssessmentDTO> autoSaveAssessment(
             @PathVariable Long id,
@@ -77,7 +77,7 @@ public class OasisAssessmentController {
     }
 
     @PostMapping("/{id}/submit")
-    @PreAuthorize("hasAuthority('OASIS_SUBMIT') or hasRole('ROLE_SYSTEM_ADMIN')")
+    @PreAuthorize("hasAuthority('OASIS_SUBMIT') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_INTAKE_COORDINATOR')")
     @Operation(summary = "Submit for QA review", description = "Submit OASIS assessment for QA review")
     public ResponseEntity<OasisAssessmentDTO> submitForQA(
             @PathVariable Long id,
@@ -110,8 +110,8 @@ public class OasisAssessmentController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority('OASIS_READ') or hasRole('ROLE_SYSTEM_ADMIN')")
-    @Operation(summary = "Get assessment by ID", description = "Get OASIS assessment details")
+    @PreAuthorize("hasAuthority('OASIS_READ') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_RN', 'ROLE_PT', 'ROLE_QA_NURSE', 'ROLE_INTAKE_COORDINATOR')")
+    @Operation(summary = "Get assessment by ID", description = "Get OASIS assessment details (RN can view their own assessments including REJECTED with QA comments)")
     public ResponseEntity<OasisAssessmentDTO> getAssessment(
             @PathVariable Long id,
             HttpServletRequest httpRequest) {
@@ -125,7 +125,7 @@ public class OasisAssessmentController {
     }
 
     @GetMapping("/patient/{patientId}")
-    @PreAuthorize("hasAuthority('OASIS_READ') or hasRole('ROLE_SYSTEM_ADMIN')")
+    @PreAuthorize("hasAuthority('OASIS_READ') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_INTAKE_COORDINATOR')")
     @Operation(summary = "Get assessments by patient", description = "Get all OASIS assessments for a patient")
     public ResponseEntity<List<OasisAssessmentDTO>> getAssessmentsByPatient(@PathVariable Long patientId) {
         log.info("REST request to get OASIS assessments for patient: {}", patientId);
@@ -134,7 +134,7 @@ public class OasisAssessmentController {
     }
 
     @GetMapping("/episode/{episodeId}")
-    @PreAuthorize("hasAuthority('OASIS_READ') or hasRole('ROLE_SYSTEM_ADMIN')")
+    @PreAuthorize("hasAuthority('OASIS_READ') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_INTAKE_COORDINATOR')")
     @Operation(summary = "Get assessments by episode", description = "Get all OASIS assessments for an episode")
     public ResponseEntity<List<OasisAssessmentDTO>> getAssessmentsByEpisode(@PathVariable Long episodeId) {
         log.info("REST request to get OASIS assessments for episode: {}", episodeId);
@@ -186,6 +186,25 @@ public class OasisAssessmentController {
             log.error("Unexpected error getting pending QA reviews", e);
             throw new RuntimeException("Failed to retrieve pending QA reviews: " + e.getMessage(), e);
         }
+    }
+
+    @GetMapping("/my/rejected")
+    @PreAuthorize("hasAuthority('OASIS_READ') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_RN', 'ROLE_PT', 'ROLE_QA_NURSE', 'ROLE_INTAKE_COORDINATOR')")
+    @Operation(summary = "Get my rejected assessments", description = "Get rejected assessments for the current user (RN/PT can see their own rejected assessments with QA comments)")
+    public ResponseEntity<List<OasisAssessmentDTO>> getMyRejectedAssessments(
+            @AuthenticationPrincipal UserPrincipal currentUser,
+            HttpServletRequest httpRequest) {
+        log.info("REST request to get rejected assessments for user: {}", currentUser != null ? currentUser.getUsername() : "unknown");
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        if (organizationId == null) {
+            throw new RuntimeException("Organization ID is required. Please select an organization.");
+        }
+        Long userId = currentUser != null ? currentUser.getId() : null;
+        if (userId == null) {
+            throw new RuntimeException("User ID is required.");
+        }
+        List<OasisAssessmentDTO> result = oasisService.getRejectedAssessmentsByClinician(userId, organizationId);
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping("/incomplete")

@@ -49,7 +49,7 @@ public class OasisAssessment extends BaseEntity {
     private LocalDate assessmentDate;
 
     @Column(name = "status", nullable = false, length = 20)
-    private String status; // DRAFT, SUBMITTED, QA_REVIEW, APPROVED, REJECTED, LOCKED
+    private String status; // DRAFT, SUBMITTED, QA_REVIEW, APPROVED, COMPLETED, REJECTED, LOCKED
 
     @Column(name = "completion_percentage")
     private Integer completionPercentage;
@@ -427,6 +427,10 @@ public class OasisAssessment extends BaseEntity {
 
     public boolean canEdit() {
         return "DRAFT".equals(status) || "REJECTED".equals(status);
+    }
+    
+    public boolean isCompleted() {
+        return "COMPLETED".equals(status) || "APPROVED".equals(status);
     }
 
     public boolean needsQAReview() {

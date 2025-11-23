@@ -115,14 +115,46 @@ public class UserService {
 
     /**
      * Update an existing user
-     * ORG_ADMIN can update users in their organization
+     * ORG_ADMIN can update users in their organization (but not SYSTEM_ADMIN users)
      * SYSTEM_ADMIN can update any user
      */
-    public UserDTO updateUser(Long id, UserRequest request) {
+    public UserDTO updateUser(Long id, UserRequest request, Long organizationId) {
         log.info("Updating user: {}", id);
 
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // Check if user is deleted
+        if (Boolean.TRUE.equals(user.getIsDeleted())) {
+            throw new RuntimeException("User not found");
+        }
+
+        // Authorization check: ORG_ADMIN can only update users in their organization
+        UserPrincipal currentUser = getCurrentUser();
+        boolean isSystemAdmin = currentUser.getAuthorities().stream()
+                .anyMatch(auth -> auth.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+
+        if (!isSystemAdmin) {
+            // Check if the user being edited is a SYSTEM_ADMIN (ORG_ADMIN cannot edit SYSTEM_ADMIN)
+            boolean targetIsSystemAdmin = user.getRoles().stream()
+                    .anyMatch(role -> role.getRoleName().equals("ROLE_SYSTEM_ADMIN"));
+            
+            if (targetIsSystemAdmin) {
+                throw new RuntimeException("You do not have permission to edit System Administrator users");
+            }
+
+            // Check if the user belongs to the ORG_ADMIN's organization
+            if (organizationId == null) {
+                throw new RuntimeException("Organization ID is required");
+            }
+
+            boolean userBelongsToOrg = user.getOrganizations().stream()
+                    .anyMatch(org -> org.getId().equals(organizationId));
+            
+            if (!userBelongsToOrg) {
+                throw new RuntimeException("You do not have permission to edit users outside your organization");
+            }
+        }
 
         // Check if username is being changed and if new username already exists
         if (!user.getUsername().equals(request.getUsername()) &&
@@ -195,6 +227,7 @@ public class UserService {
 
     /**
      * Get all users (filtered by organization for ORG_ADMIN)
+     * ORG_ADMIN cannot see SYSTEM_ADMIN users
      */
     @Transactional(readOnly = true)
     public List<UserDTO> getAllUsers(Long organizationId) {
@@ -206,9 +239,25 @@ public class UserService {
         if (isSystemAdmin) {
             // SYSTEM_ADMIN can see all users
             users = userRepository.findAllActiveUsers();
+            log.debug("SYSTEM_ADMIN requesting all users. Found {} users", users.size());
         } else if (organizationId != null) {
-            // ORG_ADMIN can see users in their organization
+            // ORG_ADMIN can see users in their organization, but NOT SYSTEM_ADMIN users
             users = userRepository.findByOrganizationId(organizationId);
+            log.debug("ORG_ADMIN requesting users for organization {}. Found {} users before filtering", organizationId, users.size());
+            
+            // Filter out SYSTEM_ADMIN users
+            int beforeFilter = users.size();
+            users = users.stream()
+                    .filter(user -> {
+                        boolean hasSystemAdminRole = user.getRoles().stream()
+                                .anyMatch(role -> role.getRoleName().equals("ROLE_SYSTEM_ADMIN"));
+                        if (hasSystemAdminRole) {
+                            log.debug("Filtering out SYSTEM_ADMIN user: {} (ID: {})", user.getUsername(), user.getId());
+                        }
+                        return !hasSystemAdminRole;
+                    })
+                    .collect(Collectors.toList());
+            log.debug("After filtering SYSTEM_ADMIN users: {} users (filtered out {})", users.size(), beforeFilter - users.size());
         } else {
             throw new RuntimeException("Organization ID is required for non-system administrators");
         }
@@ -220,9 +269,11 @@ public class UserService {
 
     /**
      * Get user by ID
+     * ORG_ADMIN can only view users in their organization (but not SYSTEM_ADMIN users)
+     * SYSTEM_ADMIN can view any user
      */
     @Transactional(readOnly = true)
-    public UserDTO getUserById(Long id) {
+    public UserDTO getUserById(Long id, Long organizationId) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
@@ -230,17 +281,77 @@ public class UserService {
             throw new RuntimeException("User not found");
         }
 
+        // Authorization check: ORG_ADMIN can only view users in their organization
+        UserPrincipal currentUser = getCurrentUser();
+        boolean isSystemAdmin = currentUser.getAuthorities().stream()
+                .anyMatch(auth -> auth.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+
+        if (!isSystemAdmin) {
+            // Check if the user being viewed is a SYSTEM_ADMIN (ORG_ADMIN cannot view SYSTEM_ADMIN)
+            boolean targetIsSystemAdmin = user.getRoles().stream()
+                    .anyMatch(role -> role.getRoleName().equals("ROLE_SYSTEM_ADMIN"));
+            
+            if (targetIsSystemAdmin) {
+                throw new RuntimeException("You do not have permission to view System Administrator users");
+            }
+
+            // Check if the user belongs to the ORG_ADMIN's organization
+            if (organizationId == null) {
+                throw new RuntimeException("Organization ID is required");
+            }
+
+            boolean userBelongsToOrg = user.getOrganizations().stream()
+                    .anyMatch(org -> org.getId().equals(organizationId));
+            
+            if (!userBelongsToOrg) {
+                throw new RuntimeException("You do not have permission to view users outside your organization");
+            }
+        }
+
         return convertToDTO(user);
     }
 
     /**
      * Soft delete user
+     * ORG_ADMIN can only delete users in their organization (but not SYSTEM_ADMIN users)
+     * SYSTEM_ADMIN can delete any user
      */
-    public void deleteUser(Long id) {
+    public void deleteUser(Long id, Long organizationId) {
         log.info("Deleting user: {}", id);
 
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+
+        if (Boolean.TRUE.equals(user.getIsDeleted())) {
+            throw new RuntimeException("User not found");
+        }
+
+        // Authorization check: ORG_ADMIN can only delete users in their organization
+        UserPrincipal currentUser = getCurrentUser();
+        boolean isSystemAdmin = currentUser.getAuthorities().stream()
+                .anyMatch(auth -> auth.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+
+        if (!isSystemAdmin) {
+            // Check if the user being deleted is a SYSTEM_ADMIN (ORG_ADMIN cannot delete SYSTEM_ADMIN)
+            boolean targetIsSystemAdmin = user.getRoles().stream()
+                    .anyMatch(role -> role.getRoleName().equals("ROLE_SYSTEM_ADMIN"));
+            
+            if (targetIsSystemAdmin) {
+                throw new RuntimeException("You do not have permission to delete System Administrator users");
+            }
+
+            // Check if the user belongs to the ORG_ADMIN's organization
+            if (organizationId == null) {
+                throw new RuntimeException("Organization ID is required");
+            }
+
+            boolean userBelongsToOrg = user.getOrganizations().stream()
+                    .anyMatch(org -> org.getId().equals(organizationId));
+            
+            if (!userBelongsToOrg) {
+                throw new RuntimeException("You do not have permission to delete users outside your organization");
+            }
+        }
 
         user.setIsDeleted(true);
         user.setIsActive(false);
@@ -251,15 +362,53 @@ public class UserService {
 
     /**
      * Assign user to organization
+     * ORG_ADMIN can only assign users in their organization (but not SYSTEM_ADMIN users)
+     * SYSTEM_ADMIN can assign any user to any organization
      */
-    public UserDTO assignOrganization(Long userId, Long organizationId) {
+    public UserDTO assignOrganization(Long userId, Long organizationId, Long requesterOrganizationId) {
         log.info("Assigning user {} to organization {}", userId, organizationId);
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
+        if (Boolean.TRUE.equals(user.getIsDeleted())) {
+            throw new RuntimeException("User not found");
+        }
+
         Organization organization = organizationRepository.findById(organizationId)
                 .orElseThrow(() -> new RuntimeException("Organization not found"));
+
+        // Authorization check: ORG_ADMIN can only assign users in their organization
+        UserPrincipal currentUser = getCurrentUser();
+        boolean isSystemAdmin = currentUser.getAuthorities().stream()
+                .anyMatch(auth -> auth.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+
+        if (!isSystemAdmin) {
+            // Check if the user being assigned is a SYSTEM_ADMIN (ORG_ADMIN cannot assign SYSTEM_ADMIN)
+            boolean targetIsSystemAdmin = user.getRoles().stream()
+                    .anyMatch(role -> role.getRoleName().equals("ROLE_SYSTEM_ADMIN"));
+            
+            if (targetIsSystemAdmin) {
+                throw new RuntimeException("You do not have permission to assign System Administrator users");
+            }
+
+            // ORG_ADMIN can only assign users that belong to their organization
+            if (requesterOrganizationId == null) {
+                throw new RuntimeException("Organization ID is required");
+            }
+
+            boolean userBelongsToOrg = user.getOrganizations().stream()
+                    .anyMatch(org -> org.getId().equals(requesterOrganizationId));
+            
+            if (!userBelongsToOrg) {
+                throw new RuntimeException("You do not have permission to assign users outside your organization");
+            }
+
+            // ORG_ADMIN can only assign to their own organization
+            if (!organizationId.equals(requesterOrganizationId)) {
+                throw new RuntimeException("You can only assign users to your own organization");
+            }
+        }
 
         user.getOrganizations().add(organization);
         User saved = userRepository.save(user);
@@ -269,15 +418,53 @@ public class UserService {
 
     /**
      * Assign role to user
+     * ORG_ADMIN can only assign roles to users in their organization (but not SYSTEM_ADMIN role)
+     * SYSTEM_ADMIN can assign any role to any user
      */
-    public UserDTO assignRole(Long userId, Long roleId) {
+    public UserDTO assignRole(Long userId, Long roleId, Long organizationId) {
         log.info("Assigning role {} to user {}", roleId, userId);
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
+        if (Boolean.TRUE.equals(user.getIsDeleted())) {
+            throw new RuntimeException("User not found");
+        }
+
         Role role = roleRepository.findById(roleId)
                 .orElseThrow(() -> new RuntimeException("Role not found"));
+
+        // Authorization check: ORG_ADMIN restrictions
+        UserPrincipal currentUser = getCurrentUser();
+        boolean isSystemAdmin = currentUser.getAuthorities().stream()
+                .anyMatch(auth -> auth.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+
+        if (!isSystemAdmin) {
+            // ORG_ADMIN cannot assign SYSTEM_ADMIN role
+            if (role.getRoleName().equals("ROLE_SYSTEM_ADMIN")) {
+                throw new RuntimeException("You do not have permission to assign System Administrator role");
+            }
+
+            // Check if the user being assigned is a SYSTEM_ADMIN (ORG_ADMIN cannot modify SYSTEM_ADMIN)
+            boolean targetIsSystemAdmin = user.getRoles().stream()
+                    .anyMatch(r -> r.getRoleName().equals("ROLE_SYSTEM_ADMIN"));
+            
+            if (targetIsSystemAdmin) {
+                throw new RuntimeException("You do not have permission to modify System Administrator users");
+            }
+
+            // Check if the user belongs to the ORG_ADMIN's organization
+            if (organizationId == null) {
+                throw new RuntimeException("Organization ID is required");
+            }
+
+            boolean userBelongsToOrg = user.getOrganizations().stream()
+                    .anyMatch(org -> org.getId().equals(organizationId));
+            
+            if (!userBelongsToOrg) {
+                throw new RuntimeException("You do not have permission to assign roles to users outside your organization");
+            }
+        }
 
         user.getRoles().add(role);
         User saved = userRepository.save(user);

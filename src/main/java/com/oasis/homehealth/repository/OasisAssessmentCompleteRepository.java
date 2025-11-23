@@ -56,5 +56,11 @@ public interface OasisAssessmentCompleteRepository extends JpaRepository<OasisAs
      */
     @Query("SELECT o FROM OasisAssessmentComplete o WHERE o.id = :id AND o.organization.id = :organizationId AND o.isDeleted = false")
     Optional<OasisAssessmentComplete> findByIdAndOrganizationId(@Param("id") Long id, @Param("organizationId") Long organizationId);
+
+    /**
+     * Find rejected assessments by clinician ID
+     */
+    @Query("SELECT o FROM OasisAssessmentComplete o WHERE o.clinician.id = :clinicianId AND o.status = 'REJECTED' AND o.isDeleted = false ORDER BY o.reviewedAt DESC")
+    List<OasisAssessmentComplete> findByClinicianIdAndStatusRejected(@Param("clinicianId") Long clinicianId);
 }
 

@@ -84,8 +84,11 @@ public class TaskController {
     @PutMapping("/{id}/start")
     @PreAuthorize("hasAuthority('TASK_UPDATE') or hasRole('ROLE_SYSTEM_ADMIN')")
     @Operation(summary = "Start task", description = "Mark a task as in progress")
-    public ResponseEntity<TaskDTO> startTask(@PathVariable Long id) {
-        TaskDTO task = taskSchedulerService.startTask(id);
+    public ResponseEntity<TaskDTO> startTask(
+            @PathVariable Long id,
+            HttpServletRequest httpRequest) {
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        TaskDTO task = taskSchedulerService.startTask(id, organizationId);
         return ResponseEntity.ok(task);
     }
 
@@ -94,8 +97,10 @@ public class TaskController {
     @Operation(summary = "Complete task", description = "Mark a task as completed")
     public ResponseEntity<TaskDTO> completeTask(
             @PathVariable Long id,
-            @RequestParam(required = false) String completionNotes) {
-        TaskDTO task = taskSchedulerService.completeTask(id, completionNotes);
+            @RequestParam(required = false) String completionNotes,
+            HttpServletRequest httpRequest) {
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        TaskDTO task = taskSchedulerService.completeTask(id, completionNotes, organizationId);
         return ResponseEntity.ok(task);
     }
 
@@ -109,11 +114,60 @@ public class TaskController {
         return ResponseEntity.ok(task);
     }
 
+    @GetMapping("/qa/pending")
+    @PreAuthorize("hasAuthority('TASK_APPROVE') or hasRole('ROLE_SYSTEM_ADMIN') or hasRole('ROLE_QA_NURSE') or hasRole('ROLE_CLINICAL_MANAGER')")
+    @Operation(summary = "Get tasks pending QA review", description = "Retrieve tasks that are completed and pending QA review")
+    public ResponseEntity<List<TaskDTO>> getPendingQAReview(
+            HttpServletRequest httpRequest,
+            @AuthenticationPrincipal UserPrincipal currentUser) {
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        
+        // SYSTEM_ADMIN can access all tasks without organization context
+        boolean isSystemAdmin = false;
+        if (currentUser != null) {
+            isSystemAdmin = currentUser.getAuthorities().stream()
+                    .anyMatch(auth -> auth.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+        }
+        
+        if (organizationId == null && !isSystemAdmin) {
+            throw new RuntimeException("Organization ID is required. Please select an organization.");
+        }
+        
+        List<TaskDTO> tasks = taskSchedulerService.getPendingQAReview(organizationId);
+        return ResponseEntity.ok(tasks);
+    }
+    
+    @PutMapping("/{id}/qa/approve")
+    @PreAuthorize("hasAuthority('TASK_APPROVE') or hasRole('ROLE_SYSTEM_ADMIN') or hasRole('ROLE_QA_NURSE') or hasRole('ROLE_CLINICAL_MANAGER')")
+    @Operation(summary = "Approve task (QA)", description = "Approve a completed task after QA review")
+    public ResponseEntity<TaskDTO> approveTask(
+            @PathVariable Long id,
+            HttpServletRequest httpRequest) {
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        TaskDTO task = taskSchedulerService.approveTask(id, organizationId);
+        return ResponseEntity.ok(task);
+    }
+    
+    @PutMapping("/{id}/qa/reject")
+    @PreAuthorize("hasAuthority('TASK_APPROVE') or hasRole('ROLE_SYSTEM_ADMIN') or hasRole('ROLE_QA_NURSE') or hasRole('ROLE_CLINICAL_MANAGER')")
+    @Operation(summary = "Reject task (QA)", description = "Reject a completed task and return for correction")
+    public ResponseEntity<TaskDTO> rejectTask(
+            @PathVariable Long id,
+            @RequestParam String reason,
+            HttpServletRequest httpRequest) {
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        TaskDTO task = taskSchedulerService.rejectTask(id, reason, organizationId);
+        return ResponseEntity.ok(task);
+    }
+
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority('TASK_READ') or hasRole('ROLE_SYSTEM_ADMIN')")
-    @Operation(summary = "Get task by ID", description = "Retrieve task details by ID")
-    public ResponseEntity<TaskDTO> getTaskById(@PathVariable Long id) {
-        TaskDTO task = taskSchedulerService.getTaskById(id);
+    @PreAuthorize("hasAuthority('TASK_READ') or hasAnyRole('ROLE_SYSTEM_ADMIN', 'ROLE_QA_NURSE', 'ROLE_CLINICAL_MANAGER', 'ROLE_ORG_ADMIN')")
+    @Operation(summary = "Get task by ID", description = "Retrieve task details by ID (QA reviewers and managers can view tasks for review)")
+    public ResponseEntity<TaskDTO> getTaskById(
+            @PathVariable Long id,
+            HttpServletRequest httpRequest) {
+        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        TaskDTO task = taskSchedulerService.getTaskById(id, organizationId);
         return ResponseEntity.ok(task);
     }
 
